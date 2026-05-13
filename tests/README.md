@@ -5,7 +5,7 @@ This directory contains End-to-End (E2E) tests for the MicroAI Paygate system.
 ## Prerequisites
 
 - [Bun](https://bun.sh) installed
-- The MicroAI Paygate stack running (`bun run stack` in the root directory)
+- The MicroAI Paygate stack running (`bun run stack` in the root directory; memory receipts and cache disabled unless overridden)
 - Go toolchain (for gateway build in helper script)
 - Rust toolchain (for verifier build in helper script)
 

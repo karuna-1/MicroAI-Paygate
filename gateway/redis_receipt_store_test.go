@@ -74,6 +74,16 @@ func TestRedisReceiptStore_StoreGetAndTTL(t *testing.T) {
 	}
 }
 
+func TestNewRedisReceiptStore_NilClient(t *testing.T) {
+	store, err := NewRedisReceiptStore(nil)
+	if err == nil {
+		t.Fatal("expected error for nil redis client")
+	}
+	if store != nil {
+		t.Fatal("expected nil store when redis client is nil")
+	}
+}
+
 func TestRedisReceiptStore_RejectsNonPositiveTTL(t *testing.T) {
 	ctx := context.Background()
 	redisServer := miniredis.RunT(t)
@@ -87,17 +97,30 @@ func TestRedisReceiptStore_RejectsNonPositiveTTL(t *testing.T) {
 		t.Fatalf("new redis receipt store: %v", err)
 	}
 
-	receipt := validTestReceipt("rcpt_redis_ttl_zero")
-	if err := store.Store(ctx, receipt, 0); err == nil {
-		t.Fatal("expected non-positive TTL to be rejected")
+	tests := []struct {
+		name string
+		ttl  time.Duration
+		id   string
+	}{
+		{name: "zero", ttl: 0, id: "rcpt_redis_ttl_zero"},
+		{name: "negative", ttl: -1 * time.Second, id: "rcpt_redis_ttl_negative"},
 	}
 
-	exists, err := rdb.Exists(ctx, redisReceiptKey(receipt.Receipt.ID)).Result()
-	if err != nil {
-		t.Fatalf("check redis key existence: %v", err)
-	}
-	if exists != 0 {
-		t.Fatal("receipt with non-positive TTL should not be stored")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			receipt := validTestReceipt(tt.id)
+			if err := store.Store(ctx, receipt, tt.ttl); err == nil {
+				t.Fatalf("expected non-positive TTL %v to be rejected", tt.ttl)
+			}
+
+			exists, err := rdb.Exists(ctx, redisReceiptKey(receipt.Receipt.ID)).Result()
+			if err != nil {
+				t.Fatalf("check redis key existence: %v", err)
+			}
+			if exists != 0 {
+				t.Fatalf("receipt with non-positive TTL %v should not be stored", tt.ttl)
+			}
+		})
 	}
 }
 

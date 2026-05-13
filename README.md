@@ -56,8 +56,8 @@ Latest local run: `bench/RESULTS-2026-05-13.txt` on Apple M2, 8 cores, 8GB RAM w
 
 | Metric | Result |
 | :--- | :--- |
-| Requests/sec | 1359.61 |
-| p99 latency | 105.69ms |
+| Requests/sec | 1526.94 |
+| p99 latency | 85.45ms |
 
 ## Architecture & Backend Internals
 
@@ -232,6 +232,7 @@ Copy `.env.example` to `.env` and fill values (see next section).
 ```bash
 bun run stack
 ```
+This local command runs the gateway with `RECEIPT_STORE=memory` and `CACHE_ENABLED=false` unless you override those variables, so the documented quick-start path does not require Redis. Use Docker Compose or set `RECEIPT_STORE=redis REDIS_URL=localhost:6379` when you want to exercise Redis-backed receipts locally.
 
 **Run Tests**
 ```bash
@@ -374,13 +375,14 @@ REDIS_DB=0
 # Receipt storage uses Redis by default so receipts survive gateway restarts.
 RECEIPT_STORE=redis
 
-# Cache Settings
-CACHE_ENABLED=true
+# Optional cache settings. Disabled by default so cache writes cannot exhaust
+# the Redis instance used for receipts.
+CACHE_ENABLED=false
 # Time-to-live for cached items in seconds (default: 3600 = 1 hour)
 CACHE_TTL_SECONDS=3600
 ```
 
-The Compose Redis service uses `--maxmemory-policy noeviction` so cache pressure cannot evict `receipt:{id}` keys before `RECEIPT_TTL`. Under memory pressure, cache writes may fail closed while receipt lookups remain durable.
+The Compose Redis service uses `--maxmemory-policy noeviction` so Redis will not evict `receipt:{id}` keys before `RECEIPT_TTL`. Response caching is off by default in Compose because cache and receipts share that Redis instance; enable `CACHE_ENABLED=true` only when you have dedicated cache capacity or accept that cache pressure can block new receipt writes.
 
 ### Docker Deployment (Production)
 

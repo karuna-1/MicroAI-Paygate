@@ -37,7 +37,7 @@ BENCH_REVEAL_HOST=true bench/bench.sh
 
 `bench.sh` pre-generates unique EIP-712 payment payloads with Bun and `ethers`, writes them to a temporary JSONL file, then gives `wrk` a Lua script that rotates request bodies across the generated payloads. This avoids benchmarking one repeated nonce/signature pair.
 
-The script refuses runs where `DURATION` plus payload age would approach `SIGNATURE_EXPIRY_SECONDS`, and the Lua script counts non-200 or `is_valid:false` responses. Set `SIGNATURE_EXPIRY_SECONDS` to the same value used by the verifier when benchmarking a non-default verifier configuration.
+The script refuses runs where `DURATION` plus payload age would approach `SIGNATURE_EXPIRY_SECONDS`, and the Lua script aggregates per-thread counts for non-200 or `is_valid:false` responses. Set `SIGNATURE_EXPIRY_SECONDS` to the same value used by the verifier when benchmarking a non-default verifier configuration.
 
 The default private key is a deterministic local test key used only for benchmark signing. Do not use a funded wallet.
 

@@ -9,7 +9,7 @@ Thanks for considering a contribution! This project is open to issues, bug fixes
 - Run `bun install`, `go mod tidy -C gateway`, and `cargo build -q -C verifier`.
 
 ## Development Workflow
-- Run the stack locally: `bun run stack`
+- Run the stack locally: `bun run stack` (uses memory receipts and cache disabled unless overridden)
 - Run unit tests:
   - Gateway: `cd gateway && go test -v`
   - Verifier: `cd verifier && cargo test`

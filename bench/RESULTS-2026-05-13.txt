@@ -1,5 +1,5 @@
 # MicroAI Paygate verifier wrk benchmark
-date_utc=2026-05-13T17:21:46Z
+date_utc=2026-05-13T17:46:46Z
 os=Darwin
 arch=arm64
 cpu=Apple M2
@@ -14,21 +14,21 @@ duration_seconds=30
 payload_count=1000
 signature_expiry_seconds=300
 expiry_safety_seconds=15
-payload_timestamp=1778692906
-payload_age_before_run_seconds=0
+payload_timestamp=1778694405
+payload_age_before_run_seconds=1
 
 Running 30s test @ http://127.0.0.1:3002/verify
   2 threads and 32 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency    25.49ms   18.30ms 298.38ms   88.00%
-    Req/Sec   683.20    193.42     0.98k    71.91%
+    Latency    22.24ms   14.59ms 259.20ms   87.59%
+    Req/Sec   767.55    177.54     1.05k    82.78%
   Latency Distribution
-     50%   22.00ms
-     75%   29.12ms
-     90%   40.50ms
-     99%  105.69ms
-  40922 requests in 30.10s, 8.98MB read
-Requests/sec:   1359.61
-Transfer/sec:    305.38KB
+     50%   19.95ms
+     75%   25.86ms
+     90%   33.50ms
+     99%   85.45ms
+  45961 requests in 30.10s, 10.08MB read
+Requests/sec:   1526.94
+Transfer/sec:    342.96KB
 validity_check_invalid_responses=0
 validity_check_non_200_responses=0

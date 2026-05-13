@@ -85,6 +85,9 @@ require_cmd() {
 }
 
 DURATION_SECONDS="$(duration_to_seconds "$DURATION")"
+require_positive_int "THREADS" "$THREADS"
+require_positive_int "CONNECTIONS" "$CONNECTIONS"
+require_positive_int "PAYLOAD_COUNT" "$PAYLOAD_COUNT"
 require_positive_int "SIGNATURE_EXPIRY_SECONDS" "$SIGNATURE_EXPIRY_SECONDS"
 require_non_negative_int "EXPIRY_SAFETY_SECONDS" "$EXPIRY_SAFETY_SECONDS"
 if (( DURATION_SECONDS + EXPIRY_SAFETY_SECONDS >= SIGNATURE_EXPIRY_SECONDS )); then
@@ -188,19 +191,31 @@ fi
 
 cat >"$LUA_FILE" <<LUA
 local payloads = {}
+local threads = {}
+local thread_total = $THREADS
+local next_thread_id = 0
+
 for line in io.lines("$PAYLOADS_FILE") do
   if line ~= "" then
     table.insert(payloads, line)
   end
 end
 
-local counter = 0
-local invalid_responses = 0
-local non_200_responses = 0
+setup = function(thread)
+  next_thread_id = next_thread_id + 1
+  thread:set("thread_id", next_thread_id)
+  thread:set("thread_total", thread_total)
+  table.insert(threads, thread)
+end
+
+counter = 0
+invalid_responses = 0
+non_200_responses = 0
 
 request = function()
   counter = counter + 1
-  local body = payloads[((counter - 1) % #payloads) + 1]
+  local offset = ((counter - 1) * thread_total) + (thread_id - 1)
+  local body = payloads[(offset % #payloads) + 1]
   return wrk.format("POST", "/verify", {["Content-Type"] = "application/json"}, body)
 end
 
@@ -214,8 +229,14 @@ response = function(status, headers, body)
 end
 
 done = function(summary, latency, requests)
-  io.write(string.format("validity_check_invalid_responses=%d\\n", invalid_responses))
-  io.write(string.format("validity_check_non_200_responses=%d\\n", non_200_responses))
+  local total_invalid = 0
+  local total_non_200 = 0
+  for _, thread in ipairs(threads) do
+    total_invalid = total_invalid + (thread:get("invalid_responses") or 0)
+    total_non_200 = total_non_200 + (thread:get("non_200_responses") or 0)
+  end
+  io.write(string.format("validity_check_invalid_responses=%d\\n", total_invalid))
+  io.write(string.format("validity_check_non_200_responses=%d\\n", total_non_200))
 end
 LUA
 
