@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -81,6 +82,87 @@ func TestNewRedisReceiptStore_NilClient(t *testing.T) {
 	}
 	if store != nil {
 		t.Fatal("expected nil store when redis client is nil")
+	}
+}
+
+func TestRedisReceiptStore_PropagatesContextErrors(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() {
+		_ = rdb.Close()
+	})
+
+	store, err := NewRedisReceiptStore(rdb)
+	if err != nil {
+		t.Fatalf("new redis receipt store: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		ctxFunc func() (context.Context, context.CancelFunc)
+		wantErr error
+	}{
+		{
+			name: "canceled",
+			ctxFunc: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx, cancel
+			},
+			wantErr: context.Canceled,
+		},
+		{
+			name: "deadline_exceeded",
+			ctxFunc: func() (context.Context, context.CancelFunc) {
+				return context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+			},
+			wantErr: context.DeadlineExceeded,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+"/store", func(t *testing.T) {
+			receipt := validTestReceipt("rcpt_redis_ctx_store_" + tt.name)
+			ctx, cancel := tt.ctxFunc()
+			defer cancel()
+
+			err := store.Store(ctx, receipt, time.Minute)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("expected %v, got %v", tt.wantErr, err)
+			}
+
+			exists, err := rdb.Exists(context.Background(), redisReceiptKey(receipt.Receipt.ID)).Result()
+			if err != nil {
+				t.Fatalf("check redis key existence: %v", err)
+			}
+			if exists != 0 {
+				t.Fatalf("receipt should not be stored when context returns %v", tt.wantErr)
+			}
+		})
+
+		t.Run(tt.name+"/get", func(t *testing.T) {
+			receipt := validTestReceipt("rcpt_redis_ctx_get_" + tt.name)
+			if err := store.Store(context.Background(), receipt, time.Minute); err != nil {
+				t.Fatalf("pre-store receipt: %v", err)
+			}
+			t.Cleanup(func() {
+				_ = rdb.Del(context.Background(), redisReceiptKey(receipt.Receipt.ID)).Err()
+			})
+
+			ctx, cancel := tt.ctxFunc()
+			defer cancel()
+
+			got, exists, err := store.Get(ctx, receipt.Receipt.ID)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("expected %v, got %v", tt.wantErr, err)
+			}
+			if got != nil {
+				t.Fatalf("expected nil receipt on context error, got %#v", got)
+			}
+			if exists {
+				t.Fatal("expected exists=false on context error")
+			}
+		})
 	}
 }
 
