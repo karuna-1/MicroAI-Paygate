@@ -40,7 +40,6 @@ func initRedis() error {
 		var err error
 		opts, err = redis.ParseURL(redisURL)
 		if err != nil {
-			redisClient = nil
 			return fmt.Errorf("invalid REDIS_URL format: %w", err)
 		}
 	} else {

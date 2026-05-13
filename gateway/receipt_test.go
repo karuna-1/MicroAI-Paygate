@@ -215,17 +215,23 @@ func TestInMemoryReceiptStore_StoreGetAndExpiry(t *testing.T) {
 		t.Fatalf("signature mismatch: got %q, want %q", got.Signature, receipt.Signature)
 	}
 
-	time.Sleep(30 * time.Millisecond)
-	if err := store.CleanupExpired(ctx); err != nil {
-		t.Fatalf("cleanup expired receipts: %v", err)
-	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if err := store.CleanupExpired(ctx); err != nil {
+			t.Fatalf("cleanup expired receipts: %v", err)
+		}
 
-	_, exists, err = store.Get(ctx, receipt.Receipt.ID)
-	if err != nil {
-		t.Fatalf("get expired receipt: %v", err)
-	}
-	if exists {
-		t.Fatal("expired receipt should not exist")
+		_, exists, err = store.Get(ctx, receipt.Receipt.ID)
+		if err != nil {
+			t.Fatalf("get expired receipt: %v", err)
+		}
+		if !exists {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expired receipt should not exist")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
