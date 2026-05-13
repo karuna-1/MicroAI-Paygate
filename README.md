@@ -199,7 +199,7 @@ This section exists because every honest project has rough edges, and pretending
 - **Rate limiter is per-process and in-memory.** Horizontal scaling of the gateway would silently weaken the limits, since each replica has its own token buckets. Distributed rate limiting (e.g., Redis-backed sliding window) is a known follow-up.
 - **Demo runs against free OpenRouter models** (`z-ai/glm-4.5-air:free`). Summaries are mediocre by design — this is a deliberate cost tradeoff to keep the public demo at zero recurring spend.
 
-If you find more, open an issue — but note that PR reviews are paused for the current placement season and will resume after.
+If you find more, open an issue.
 
 ## Installation & Deployment
 
