@@ -48,18 +48,6 @@ MicroAI Paygate is designed to be frictionless and trustless:
 3.  **Polyglot Performance**: We use the right tool for the job—Go for I/O bound routing, Rust for CPU-bound cryptography, and TypeScript for UI.
 4.  **Standard Compliance**: Fully compliant with EIP-712, ensuring users know exactly what they are signing.
 
-## Performance Benchmarks
-
-The migration to a polyglot microservices architecture resulted in significant performance improvements across key metrics.
-
-| Metric | Monolithic Stack (Node.js) | Microservices Stack (Go/Rust) | Improvement |
-| :--- | :--- | :--- | :--- |
-| **Request Latency (P99)** | 120ms | 15ms | **8x Faster** |
-| **Verification Time** | 45ms | 2ms | **22x Faster** |
-| **Concurrent Connections** | ~3,000 | ~50,000+ | **16x Scale** |
-| **Memory Footprint** | 150MB | 25MB (Combined) | **6x More Efficient** |
-| **Cold Start** | 1.5s | <100ms | **Instant** |
-
 ## Architecture & Backend Internals
 
 ### System Architecture
