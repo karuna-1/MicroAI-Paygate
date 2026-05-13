@@ -132,14 +132,13 @@ func resetServerPrivateKeyForTest(t *testing.T) {
 	t.Helper()
 	origKey := serverPrivateKey
 	origErr := serverPrivateKeyErr
-	origOnce := serverPrivateKeyOnce
 	serverPrivateKey = nil
 	serverPrivateKeyErr = nil
 	serverPrivateKeyOnce = sync.Once{}
 	t.Cleanup(func() {
 		serverPrivateKey = origKey
 		serverPrivateKeyErr = origErr
-		serverPrivateKeyOnce = origOnce
+		serverPrivateKeyOnce = sync.Once{}
 	})
 }
 
