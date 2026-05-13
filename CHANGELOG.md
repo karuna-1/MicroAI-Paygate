@@ -4,7 +4,7 @@
 
 - Add configurable gateway CORS origins via `ALLOWED_ORIGINS`.
 - Add configurable receipt storage via `RECEIPT_STORE`, defaulting to Redis-backed receipts with `memory` available for tests and local experiments.
-- Add a reproducible verifier micro-benchmark harness under `bench/`; measured results are intentionally not committed until `wrk` is available and raw output can be captured.
+- Add a reproducible verifier micro-benchmark harness under `bench/` with raw `wrk` output captured in `bench/RESULTS-2026-05-13.txt`.
 - Remove unsupported benchmark multiplier claims from the README.
 - **Breaking**: Add `timestamp` field (Unix seconds) to EIP-712 `Payment`/`PaymentContext` message used across verifier, gateway, and TypeScript clients.
 - Add configurable signature expiry window via `SIGNATURE_EXPIRY_SECONDS` (default 300 seconds) and clock skew grace via `SIGNATURE_CLOCK_SKEW_SECONDS` (default 60 seconds).

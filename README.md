@@ -48,6 +48,17 @@ MicroAI Paygate is designed to be frictionless and trustless:
 3.  **Polyglot Performance**: We use the right tool for the job—Go for I/O bound routing, Rust for CPU-bound cryptography, and TypeScript for UI.
 4.  **Standard Compliance**: Fully compliant with EIP-712, ensuring users know exactly what they are signing.
 
+## Measured Verifier Benchmark
+
+The reproducible verifier micro-benchmark lives in [`bench/`](bench/README.md) and measures only the Rust `/verify` endpoint. It does not measure gateway, wallet UI, Redis, OpenRouter, or end-to-end x402 latency.
+
+Latest local run: `bench/RESULTS-2026-05-13.txt` on Apple M2, 8 cores, 8GB RAM with `wrk 4.2.0`, 2 threads, 32 connections, 30 seconds, and 1000 rotated signed payloads.
+
+| Metric | Result |
+| :--- | :--- |
+| Requests/sec | 1742.93 |
+| p99 latency | 42.61ms |
+
 ## Architecture & Backend Internals
 
 ### System Architecture

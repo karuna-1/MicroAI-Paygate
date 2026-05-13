@@ -31,10 +31,10 @@ if ! (cd "$ROOT_DIR" && bun -e 'import { Wallet } from "ethers"; void Wallet;' >
 fi
 
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
 PAYLOADS_FILE="$TMP_DIR/payloads.jsonl"
 LUA_FILE="$TMP_DIR/rotate-payloads.lua"
-GENERATOR_FILE="$TMP_DIR/generate-payloads.mjs"
+GENERATOR_FILE="$ROOT_DIR/bench/.generate-payloads.tmp.mjs"
+trap 'rm -rf "$TMP_DIR"; rm -f "$GENERATOR_FILE"' EXIT
 
 cat >"$GENERATOR_FILE" <<'JS'
 import { randomUUID } from "node:crypto";
@@ -134,7 +134,7 @@ run_benchmark() {
   echo "duration=$DURATION"
   echo "payload_count=$PAYLOAD_COUNT"
   echo
-  wrk -t "$THREADS" -c "$CONNECTIONS" -d "$DURATION" -s "$LUA_FILE" "$TARGET_URL"
+  wrk --latency -t "$THREADS" -c "$CONNECTIONS" -d "$DURATION" -s "$LUA_FILE" "$TARGET_URL"
 }
 
 if [[ -n "$RESULTS_FILE" ]]; then
