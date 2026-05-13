@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -164,6 +165,67 @@ func TestReceiptJSONSerialization(t *testing.T) {
 		if _, exists := decoded[field]; !exists {
 			t.Errorf("Missing field in JSON: %s", field)
 		}
+	}
+}
+
+func TestInMemoryReceiptStore_StoreGetAndExpiry(t *testing.T) {
+	store := NewInMemoryReceiptStore()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("failed to close receipt store: %v", err)
+		}
+	})
+
+	receipt := &SignedReceipt{
+		Receipt: Receipt{
+			ID:        "rcpt_123456789abc",
+			Version:   "1.0",
+			Timestamp: time.Now().UTC(),
+			Payment: PaymentDetails{
+				Payer:     "0x742d35Cc6634C0532925a3b844Bc9e7595f8fE21",
+				Recipient: "0x2cAF48b4BA1C58721a85dFADa5aC01C2DFa62219",
+				Amount:    "0.001",
+				Token:     "USDC",
+				ChainID:   8453,
+				Nonce:     "test-nonce",
+			},
+			Service: ServiceDetails{
+				Endpoint:     "/api/ai/summarize",
+				RequestHash:  "sha256:test",
+				ResponseHash: "sha256:response",
+			},
+		},
+		Signature:       "0x1234567890abcdef",
+		ServerPublicKey: "0xabcdef1234567890",
+	}
+
+	ctx := context.Background()
+	if err := store.Store(ctx, receipt, 20*time.Millisecond); err != nil {
+		t.Fatalf("store receipt: %v", err)
+	}
+
+	got, exists, err := store.Get(ctx, receipt.Receipt.ID)
+	if err != nil {
+		t.Fatalf("get receipt: %v", err)
+	}
+	if !exists {
+		t.Fatal("receipt not found after storing")
+	}
+	if got.Signature != receipt.Signature {
+		t.Fatalf("signature mismatch: got %q, want %q", got.Signature, receipt.Signature)
+	}
+
+	time.Sleep(30 * time.Millisecond)
+	if err := store.CleanupExpired(ctx); err != nil {
+		t.Fatalf("cleanup expired receipts: %v", err)
+	}
+
+	_, exists, err = store.Get(ctx, receipt.Receipt.ID)
+	if err != nil {
+		t.Fatalf("get expired receipt: %v", err)
+	}
+	if exists {
+		t.Fatal("expired receipt should not exist")
 	}
 }
 

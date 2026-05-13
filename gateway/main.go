@@ -771,75 +771,6 @@ func getEnvAsInt(key string, defaultValue int) int {
 	return val
 }
 
-// Receipt Management Functions
-
-var (
-	receiptStoreMu         sync.RWMutex
-	receiptStore           = make(map[string]*receiptEntry)
-	receiptCleanupInterval = 5 * time.Minute
-)
-
-type receiptEntry struct {
-	receipt   *SignedReceipt
-	expiresAt time.Time
-}
-
-// startReceiptCleanup runs periodic cleanup in a single goroutine
-// This prevents goroutine leaks by using a single background worker
-// instead of spawning one goroutine per receipt
-func startReceiptCleanup(ctx context.Context) {
-	ticker := time.NewTicker(receiptCleanupInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Println("Receipt cleanup goroutine stopped")
-			return
-		case <-ticker.C:
-			cleanupExpiredReceipts()
-		}
-	}
-}
-
-// cleanupExpiredReceipts removes expired receipts from the store
-func cleanupExpiredReceipts() {
-	now := time.Now()
-	receiptStoreMu.Lock()
-	defer receiptStoreMu.Unlock()
-
-	count := 0
-	for id, entry := range receiptStore {
-		if now.After(entry.expiresAt) {
-			delete(receiptStore, id)
-			count++
-		}
-	}
-
-	if count > 0 {
-		log.Printf("Cleaned up %d expired receipts", count)
-	}
-}
-
-// storeReceipt stores a receipt with TTL
-// Returns error for future extensibility (Redis/Postgres implementations)
-func storeReceipt(receipt *SignedReceipt, ttl time.Duration) error {
-	// Validate receipt format before storage
-	if err := validateReceipt(receipt); err != nil {
-		return fmt.Errorf("invalid receipt format: %w", err)
-	}
-
-	receiptStoreMu.Lock()
-	defer receiptStoreMu.Unlock()
-
-	receiptStore[receipt.Receipt.ID] = &receiptEntry{
-		receipt:   receipt,
-		expiresAt: time.Now().Add(ttl),
-	}
-
-	return nil
-}
-
 // validateReceipt validates that a receipt has all required fields
 func validateReceipt(receipt *SignedReceipt) error {
 	if receipt == nil {
@@ -905,24 +836,6 @@ func validateReceipt(receipt *SignedReceipt) error {
 	}
 
 	return nil
-}
-
-// getReceipt retrieves a receipt by ID
-func getReceipt(id string) (*SignedReceipt, bool) {
-	receiptStoreMu.RLock()
-	defer receiptStoreMu.RUnlock()
-
-	entry, exists := receiptStore[id]
-	if !exists {
-		return nil, false
-	}
-
-	// Check if expired
-	if time.Now().After(entry.expiresAt) {
-		return nil, false
-	}
-
-	return entry.receipt, true
 }
 
 // getReceiptTTL returns configured TTL or default 24h
