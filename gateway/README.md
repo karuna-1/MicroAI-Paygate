@@ -5,7 +5,7 @@ The Gateway is the high-performance entry point for the MicroAI Paygate architec
 ## Role & Responsibilities
 
 - **Traffic Entry Point**: Listens on port 3000 and accepts all incoming API requests.
-- **x402 Enforcement**: Inspects headers for `X-402-Signature` and `X-402-Nonce`. If missing, it rejects the request with a 402 status and payment context.
+- **x402 Enforcement**: Inspects headers for `X-402-Signature`, `X-402-Nonce`, and `X-402-Timestamp`. If missing, it rejects the request with a 402 status and payment context.
 - **Verification Orchestration**: Communicates with the internal Rust Verifier service to validate cryptographic signatures.
 - **Proxying**: Forwards authenticated requests to the OpenRouter API and returns the response to the client.
 
@@ -42,7 +42,7 @@ Environment variables (via `.env`):
 - `VERIFIER_URL` — override verifier endpoint, default `http://127.0.0.1:3002`
 - `ALLOWED_ORIGINS` — comma-separated CORS allowed origins, default `http://localhost:3001`; values must be origins only, with no path/query/fragment
 - `RECIPIENT_ADDRESS` — payment recipient; falls back to default if unset
-- `CHAIN_ID` — chain id used in EIP-712 domain; default `8453`
+- `CHAIN_ID` — chain id used in EIP-712 domain; default `84532` (Base Sepolia)
 - `RECEIPT_STORE` — receipt storage backend, `redis` by default or `memory` for tests/local experiments
 - `RECEIPT_TTL` — receipt TTL in seconds, default `86400`
 - `REDIS_URL` — required when `CACHE_ENABLED=true` or `RECEIPT_STORE=redis`; use `redis:6379` in Compose and `localhost:6379` locally

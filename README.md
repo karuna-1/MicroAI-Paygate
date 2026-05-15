@@ -52,7 +52,7 @@ MicroAI Paygate is designed to be frictionless and trustless:
 
 The reproducible verifier micro-benchmark lives in [`bench/`](bench/README.md) and measures only the Rust `/verify` endpoint. It does not measure gateway, wallet UI, Redis, OpenRouter, or end-to-end x402 latency.
 
-Latest local run: `bench/RESULTS-2026-05-13.txt` on Apple M2, 8 cores, 8GB RAM with `wrk 4.2.0`, 2 threads, 32 connections, 30 seconds, and 1000 rotated signed payloads.
+Latest local run: `bench/RESULTS-2026-05-13.txt` on Apple M2, 8 cores, 8GB RAM with `wrk 4.2.0`, 2 threads, 32 connections, and 30 seconds. Current reruns should use enough one-time signed payloads for the full run because verifier nonces are replay-protected.
 
 | Metric | Result |
 | :--- | :--- |
@@ -165,7 +165,8 @@ When a `402 Payment Required` response is returned, it includes the payment cont
     "token": "USDC",
     "amount": "0.001",
     "nonce": "9c311e31-eb30-420a-bced-c0d68bc89cea",
-    "chainId": 8453
+    "chainId": 84532,
+    "timestamp": 1700000000
   }
 }
 ```
@@ -173,6 +174,7 @@ When a `402 Payment Required` response is returned, it includes the payment cont
 The client signs this data using EIP-712 and resends with headers:
 - `X-402-Signature`: The cryptographic signature
 - `X-402-Nonce`: The nonce from the payment context
+- `X-402-Timestamp`: The timestamp from the payment context
 
 ---
 
@@ -195,7 +197,7 @@ This section exists because every honest project has rough edges, and pretending
 - **Receipts now default to Redis-backed storage** (`RECEIPT_STORE=redis`) with the same TTL used by the receipt lookup API. `RECEIPT_STORE=memory` is still available for tests and local experiments, but memory mode loses receipts on restart and should not be used for multi-replica deployments.
 - **A valid signature is not a settled payment.** The verifier proves the signer authorized the payment context; it does not check that USDC actually moved on Base. A production deployment would either (a) require pre-paid balances tracked off-chain, (b) poll an indexer for on-chain settlement before fulfilling, or (c) accept the float risk for tiny micropayments. This system does (c) implicitly, which is acceptable for a demo but not for real money at scale.
 - **Single-chain hardcoded to Base / Base Sepolia.** Multi-chain support would require dynamic EIP-712 domains and per-chain recipient/token configs. Not difficult, just not done.
-- **Replay protection relies on a 5-minute timestamp window**, not a persistent nonce store. Inside the window, the same `(signature, nonce, timestamp)` triple is technically reusable. A nonce-set in Redis would close this gap; the timestamp window is a deliberate "good enough for low-value demo traffic" choice.
+- **Replay protection is in-memory inside one verifier instance.** The verifier rejects reused nonce hashes during the signature window, which is enough for this single-instance demo. Production multi-replica deployment still needs Redis or another shared nonce store so all verifier replicas reject the same replayed nonce.
 - **Rate limiter is per-process and in-memory.** Horizontal scaling of the gateway would silently weaken the limits, since each replica has its own token buckets. Distributed rate limiting (e.g., Redis-backed sliding window) is a known follow-up.
 - **Demo runs against free OpenRouter models** (`z-ai/glm-4.5-air:free`). Summaries are mediocre by design — this is a deliberate cost tradeoff to keep the public demo at zero recurring spend.
 
@@ -267,12 +269,12 @@ Create a `.env` (or use `.env.example`) with at least:
 - `OPENROUTER_MODEL` — model name (default: `z-ai/glm-4.5-air:free`)
 - `SERVER_WALLET_PRIVATE_KEY` — private key for the server wallet (recipient of payments)
 - `RECIPIENT_ADDRESS` — wallet address for receiving payments
-- `CHAIN_ID` — chain used in signatures (default: `8453` for Base)
+- `CHAIN_ID` — chain used in signatures (default: `84532` for Base Sepolia)
 
 > **Note:** The gateway validates required environment variables at startup. If `OPENROUTER_API_KEY` is missing, the server will exit with a helpful error message.
 
 **Optional Configuration:**
-- `USDC_TOKEN_ADDRESS` — USDC contract address (default: Base USDC)
+- `USDC_TOKEN_ADDRESS` — reserved for future on-chain settlement; the current gateway/verifier use `USDC` in the signed payment context
 - `PAYMENT_AMOUNT` — cost per request in USDC (default: `0.001`)
 - `VERIFIER_URL` — URL of verifier service (default: `http://127.0.0.1:3002`)
 

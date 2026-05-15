@@ -50,6 +50,7 @@ type VerifyResponse struct {
 	IsValid          bool   `json:"is_valid"`
 	RecoveredAddress string `json:"recovered_address"`
 	Error            string `json:"error"`
+	ErrorCode        string `json:"error_code"`
 }
 
 type SummarizeRequest struct {
@@ -225,7 +226,7 @@ func main() {
 		fmt.Println("[WARN] VERIFIER_URL not set, using default verifier")
 	}
 	if os.Getenv("CHAIN_ID") == "" {
-		fmt.Println("[WARN] CHAIN_ID not set, using default: 8453(base)")
+		fmt.Println("[WARN] CHAIN_ID not set, using default: 84532(Base Sepolia)")
 	}
 
 	r := gin.Default()
@@ -395,13 +396,13 @@ func handleSummarize(c *gin.Context) {
 	}
 
 	if timestampHeader == "" {
-		c.JSON(400, gin.H{"error": "Invalid timestamp", "details": "Missing X-402-Timestamp header"})
+		respondError(c, 400, "invalid_timestamp", fmt.Errorf("missing X-402-Timestamp header"))
 		return
 	}
 
 	timestampValue, err := strconv.ParseUint(timestampHeader, 10, 64)
 	if err != nil || timestampValue == 0 {
-		c.JSON(400, gin.H{"error": "Invalid timestamp", "details": "Invalid X-402-Timestamp header"})
+		respondError(c, 400, "invalid_timestamp", fmt.Errorf("invalid X-402-Timestamp header"))
 		return
 	}
 
@@ -422,7 +423,7 @@ func handleSummarize(c *gin.Context) {
 			if errors.As(err, &maxBytesErr) {
 				c.JSON(413, gin.H{"error": "Payload too large", "max_size": "10MB"})
 			} else {
-				c.JSON(500, gin.H{"error": "Failed to read request body"})
+				respondError(c, 500, "request_body_read_failed", err)
 			}
 			return
 		}
@@ -431,24 +432,20 @@ func handleSummarize(c *gin.Context) {
 	// Verify
 	verifyResp, paymentCtx, err := verifyPayment(c.Request.Context(), signature, nonce, uint64(timestampValue))
 	if err != nil {
-		log.Printf("Verification error: %v", err)
 		if errors.Is(err, context.DeadlineExceeded) {
-			c.JSON(504, gin.H{"error": "Gateway Timeout", "message": "Verifier request timed out"})
+			respondError(c, 504, "verifier_timeout", err)
 		} else {
-			c.JSON(500, gin.H{"error": "Verification Service Failed", "message": "An internal error occurred"})
+			respondError(c, 502, "verification_unavailable", err)
 		}
 		return
 	}
 
 	if !verifyResp.IsValid {
-		// Check for timestamp-related errors (E007, E008, E009)
-		if strings.HasPrefix(verifyResp.Error, "E007") ||
-			strings.HasPrefix(verifyResp.Error, "E008") ||
-			strings.HasPrefix(verifyResp.Error, "E009") {
-			c.JSON(400, gin.H{"error": "Invalid timestamp", "details": verifyResp.Error})
-		} else {
-			c.JSON(403, gin.H{"error": "Invalid Signature", "details": verifyResp.Error})
-		}
+		respondVerificationFailure(c, verifyResp)
+		return
+	}
+	if verifyResp.RecoveredAddress == "" {
+		respondError(c, 502, "verification_unavailable", fmt.Errorf("verifier success missing recovered_address"))
 		return
 	}
 
@@ -468,11 +465,11 @@ func handleSummarize(c *gin.Context) {
 	// 3. Call AI Service
 	summary, err := aiProvider.Generate(c.Request.Context(), req.Text)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || c.Request.Context().Err() == context.DeadlineExceeded {
-			c.JSON(504, gin.H{"error": "Gateway Timeout", "message": "AI request timed out"})
-			return
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(c.Request.Context().Err(), context.DeadlineExceeded) {
+			respondError(c, 504, "upstream_timeout", err)
+		} else {
+			respondError(c, 502, "upstream_unavailable", err)
 		}
-		c.JSON(500, gin.H{"error": "AI Service Failed", "details": err.Error()})
 		return
 	}
 
@@ -534,8 +531,17 @@ func verifyPayment(ctx context.Context, signature, nonce string, timestamp uint6
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
-		return nil, nil, fmt.Errorf("verifier returned status %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		bodyText := strings.TrimSpace(string(body))
+		var verifyResp VerifyResponse
+		if bodyText != "" && json.Unmarshal(body, &verifyResp) == nil && isVerifierBusinessRejection(&verifyResp) {
+			return &verifyResp, &paymentCtx, nil
+		}
+		if bodyText == "" {
+			return nil, nil, fmt.Errorf("verifier returned status %d", resp.StatusCode)
+		}
+		return nil, nil, fmt.Errorf("verifier returned status %d: %s", resp.StatusCode, bodyText)
 	}
 
 	var verifyResp VerifyResponse
@@ -556,25 +562,25 @@ func generateAndSendReceipt(c *gin.Context, paymentCtx PaymentContext, recovered
 	}
 	responseBody, err := json.Marshal(responseMap)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to encode response"})
+		respondError(c, 500, "response_encoding_failed", err)
 		return err
 	}
 
 	// Generate receipt with the actual response body hash
 	receipt, err := GenerateReceipt(paymentCtx, recoveredAddr, c.Request.URL.Path, requestBody, responseBody)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to generate receipt", "details": err.Error()})
+		respondError(c, 500, "receipt_generation_failed", err)
 		return err
 	}
 
 	if err := storeReceiptWithContext(c.Request.Context(), receipt, getReceiptTTL()); err != nil {
-		c.JSON(500, gin.H{"error": "Failed to store receipt"})
+		respondError(c, 500, "receipt_store_failed", err)
 		return err
 	}
 
 	receiptJSON, err := json.Marshal(receipt)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to encode receipt"})
+		respondError(c, 500, "receipt_encoding_failed", err)
 		return err
 	}
 	receiptBase64 := base64.StdEncoding.EncodeToString(receiptJSON)
@@ -585,7 +591,7 @@ func generateAndSendReceipt(c *gin.Context, paymentCtx PaymentContext, recovered
 	return nil
 }
 
-// createPaymentContext constructs a PaymentContext prefilled with the recipient address (from RECIPIENT_ADDRESS or a fallback), the USDC token, amount "0.001", a newly generated UUID nonce, and chain ID 8453.
+// createPaymentContext constructs a PaymentContext prefilled with the recipient address (from RECIPIENT_ADDRESS or a fallback), the USDC token, amount "0.001", a newly generated UUID nonce, and the configured chain ID.
 func createPaymentContext() PaymentContext {
 	return PaymentContext{
 		Recipient: getRecipientAddress(),
@@ -619,16 +625,16 @@ func getPaymentAmount() string {
 }
 
 // getChainID returns the blockchain chain ID from the CHAIN_ID environment variable.
-// If unset or invalid, it defaults to 8453 (Base).
+// If unset or invalid, it defaults to 84532 (Base Sepolia).
 func getChainID() int {
 	chainIDStr := os.Getenv("CHAIN_ID")
 	if chainIDStr == "" {
-		return 8453
+		return 84532
 	}
 	chainID, err := strconv.Atoi(chainIDStr)
 	if err != nil {
-		log.Printf("Warning: Invalid CHAIN_ID '%s', using default 8453", chainIDStr)
-		return 8453
+		log.Printf("Warning: Invalid CHAIN_ID '%s', using default 84532", chainIDStr)
+		return 84532
 	}
 	return chainID
 }
