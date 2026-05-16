@@ -69,6 +69,7 @@ fly secrets set -a <gateway-app> \
   OPENROUTER_MODEL=z-ai/glm-4.5-air:free \
   SERVER_WALLET_PRIVATE_KEY=<your-demo-server-wallet-private-key> \
   RECIPIENT_ADDRESS=<your-base-sepolia-recipient-address> \
+  PAYMENT_AMOUNT=0.001 \
   REDIS_URL=<your-upstash-redis-url> \
   ALLOWED_ORIGINS=https://<your-vercel-app>.vercel.app
 ```
@@ -81,6 +82,8 @@ If you later enable `RATE_LIMIT_ENABLED=true` on Fly, configure trusted Fly prox
 fly secrets set -a <gateway-app> \
   TRUSTED_PROXIES=<fly-proxy-cidr>
 ```
+
+Mirror non-secret runtime values from `.env.production.example` in the Fly config files and use Fly secrets only for secret or environment-specific values. Keep `CHAIN_ID` and `EXPECTED_CHAIN_ID` synchronized.
 
 The verifier currently needs no secret material. Its non-secret defaults are committed in `deploy/fly/verifier.fly.toml`:
 

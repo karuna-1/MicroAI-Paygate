@@ -207,8 +207,12 @@ func main() {
 	if port := os.Getenv("PORT"); port != "" {
 		fmt.Printf("    - Port: %s\n", port)
 	}
-	if model := os.Getenv("MODEL"); model != "" {
-		fmt.Printf("    - Model: %s\n", model)
+	modelKey := "OPENROUTER_MODEL"
+	if providerType == "ollama" {
+		modelKey = "OLLAMA_MODEL"
+	}
+	if model := os.Getenv(modelKey); model != "" {
+		fmt.Printf("    - %s: %s\n", modelKey, model)
 	}
 	if verifier := os.Getenv("VERIFIER_URL"); verifier != "" {
 		fmt.Printf("    - Verifier: %s\n", verifier)
@@ -219,8 +223,8 @@ func main() {
 	if os.Getenv("PORT") == "" {
 		fmt.Println("[WARN] PORT not set, using default: 3000")
 	}
-	if os.Getenv("MODEL") == "" {
-		fmt.Println("[WARN] MODEL not set, using default model")
+	if os.Getenv(modelKey) == "" {
+		fmt.Printf("[WARN] %s not set, using provider default model\n", modelKey)
 	}
 	if os.Getenv("VERIFIER_URL") == "" {
 		fmt.Println("[WARN] VERIFIER_URL not set, using default verifier")
