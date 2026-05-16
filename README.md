@@ -74,6 +74,66 @@ flowchart TB
     end
 ```
 
+### Deep System Design
+
+```mermaid
+flowchart TB
+    Browser["Browser wallet UI\nweb/src/app/page.tsx"]
+    CLI["CLI or agent client"]
+
+    subgraph Gateway["gateway/ Go service"]
+      Gin["Gin router"]
+      Correlation["Correlation ID middleware"]
+      Compression["gzip middleware"]
+      CORS["CORS allowed origins"]
+      RateLimit["Token bucket rate limiter"]
+      Timeout["Request timeout middleware"]
+      Cache["Optional Redis response cache\npayment still required"]
+      Summarize["POST /api/ai/summarize"]
+      PaymentContext["Create PaymentContext\nrecipient, amount, chainId, nonce, timestamp"]
+      VerifyClient["Verifier HTTP client\nVERIFIER_URL"]
+      AIClient["AI provider client\nOpenRouter or Ollama"]
+      ReceiptSigner["Receipt signer\nserver wallet key"]
+      ReceiptLookup["GET /api/receipts/{id}"]
+      Health["/healthz and /readyz"]
+    end
+
+    subgraph VerifierService["verifier/ Rust service"]
+      BodyLimit["Body size limit"]
+      Domain["EIP-712 domain\nname, version, chainId, zero verifyingContract"]
+      Timestamp["Timestamp expiry and clock skew checks"]
+      Nonce["In-memory nonce replay guard"]
+      Recovery["ECDSA recovery"]
+      VerifyRoute["POST /verify"]
+    end
+
+    subgraph Storage["Redis 7"]
+      Receipts["receipt:{id}\nTTL persisted receipts"]
+      ResponseCache["ai:summary:{hash}\noptional cached summaries"]
+    end
+
+    subgraph Providers["AI providers"]
+      OpenRouter["OpenRouter chat completions"]
+      Ollama["Local Ollama generate API"]
+    end
+
+    Browser --> Gin
+    CLI --> Gin
+    Gin --> Correlation --> Compression --> CORS --> RateLimit --> Timeout --> Cache --> Summarize
+    Summarize -->|missing x402 headers| PaymentContext
+    PaymentContext --> Browser
+    Summarize -->|signed retry| VerifyClient --> VerifyRoute
+    VerifyRoute --> BodyLimit --> Domain --> Timestamp --> Nonce --> Recovery
+    Recovery --> VerifyClient
+    Summarize --> AIClient
+    AIClient --> OpenRouter
+    AIClient --> Ollama
+    Summarize --> ReceiptSigner --> Receipts
+    Cache <--> ResponseCache
+    ReceiptLookup --> Receipts
+    Gin --> Health
+```
+
 ### x402 Payment Flow
 
 ```mermaid
