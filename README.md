@@ -51,9 +51,9 @@ flowchart TB
     Web["web/ Next.js app :3001"]
     Gateway["gateway/ Go Gin API :3000"]
     Verifier["verifier/ Rust Axum :3002"]
-    Redis["Redis 7 receipts and optional response cache"]
+    Redis["Redis 7 receipt store by default\noptional response cache"]
     AI["AI provider: OpenRouter or Ollama"]
-    Wallet["EVM wallet on Base Sepolia"]
+    Wallet["EVM wallet on configured chain\nBase Sepolia default"]
 
     Client --> Web
     Client --> Gateway
@@ -61,7 +61,7 @@ flowchart TB
     Web -. "switch chain and sign EIP-712" .-> Wallet
     Gateway --> Verifier
     Gateway --> AI
-    Gateway --> Redis
+    Gateway -->|"receipts and cache when configured"| Redis
 
     subgraph Public["Public surface"]
       Web
@@ -83,14 +83,15 @@ flowchart TB
 
     subgraph Gateway["gateway/ Go service"]
       Gin["Gin router"]
+      LoggerRecovery["Gin logger and recovery"]
       Correlation["Correlation ID middleware"]
       Compression["gzip middleware"]
       CORS["CORS allowed origins"]
       RateLimit["Token bucket rate limiter"]
       Timeout["Request timeout middleware"]
-      Cache["Optional Redis response cache\npayment still required"]
+      Cache["Optional Redis cache middleware\nbypasses unsigned requests; verifies signed cache hits"]
       Summarize["POST /api/ai/summarize"]
-      PaymentContext["Create PaymentContext\nrecipient, amount, chainId, nonce, timestamp"]
+      PaymentContext["Create PaymentContext\nrecipient, token, amount, chainId, nonce, timestamp"]
       VerifyClient["Verifier HTTP client\nVERIFIER_URL"]
       AIClient["AI provider client\nOpenRouter or Ollama"]
       ReceiptSigner["Receipt signer\nserver wallet key"]
@@ -108,9 +109,11 @@ flowchart TB
     end
 
     subgraph Storage["Redis 7"]
-      Receipts["receipt:{id}\nTTL persisted receipts"]
+      Receipts["receipt:{id}\nRedis receipt store by default"]
       ResponseCache["ai:summary:{hash}\noptional cached summaries"]
     end
+
+    MemoryStore["In-memory receipt store\nquick start and tests when RECEIPT_STORE=memory"]
 
     subgraph Providers["AI providers"]
       OpenRouter["OpenRouter chat completions"]
@@ -119,18 +122,24 @@ flowchart TB
 
     Browser --> Gin
     CLI --> Gin
-    Gin --> Correlation --> Compression --> CORS --> RateLimit --> Timeout --> Cache --> Summarize
+    Gin --> LoggerRecovery --> Correlation --> Compression --> CORS --> RateLimit --> Timeout --> Cache
+    Cache -->|cache miss or disabled| Summarize
+    Cache -->|signed cache hit| VerifyClient
     Summarize -->|missing x402 headers| PaymentContext
     PaymentContext --> Browser
+    PaymentContext --> CLI
     Summarize -->|signed retry| VerifyClient --> VerifyRoute
     VerifyRoute --> BodyLimit --> Domain --> Timestamp --> Nonce --> Recovery
-    Recovery --> VerifyClient
-    Summarize --> AIClient
+    Recovery -->|valid or structured error_code| VerifyClient
+    Summarize -->|verified cache miss| AIClient
     AIClient --> OpenRouter
     AIClient --> Ollama
     Summarize --> ReceiptSigner --> Receipts
+    ReceiptSigner --> MemoryStore
+    Cache -->|cached response receipt| ReceiptSigner
     Cache <--> ResponseCache
     ReceiptLookup --> Receipts
+    ReceiptLookup --> MemoryStore
     Gin --> Health
 ```
 
@@ -142,16 +151,23 @@ sequenceDiagram
     participant G as Gateway
     participant V as Verifier
     participant A as AI Provider
-    participant R as Redis
+    participant R as Receipt Store / Optional Cache
 
     C->>G: POST /api/ai/summarize
-    G-->>C: 402 + paymentContext(recipient, amount, chainId, nonce, timestamp)
+    G-->>C: 402 + paymentContext(recipient, token, amount, chainId, nonce, timestamp)
     C->>C: Sign EIP-712 Payment typed data
     C->>G: Retry with X-402-Signature, X-402-Nonce, X-402-Timestamp
-    G->>V: POST /verify with context + signature
+    G->>V: POST /verify with reconstructed context + signature
     V-->>G: is_valid + recovered_address or structured error_code
-    G->>A: Generate summary
-    A-->>G: Summary text
+    alt Redis response cache hit
+      G->>R: Read cached summary after verification
+    else Cache miss or cache disabled
+      G->>A: Generate summary
+      A-->>G: Summary text
+      opt CACHE_ENABLED=true
+        G->>R: Store cached summary
+      end
+    end
     G->>G: Sign receipt over request/response hashes
     G->>R: Store receipt with TTL
     G-->>C: 200 { result } + X-402-Receipt
@@ -163,10 +179,10 @@ sequenceDiagram
 flowchart LR
     Success["Successful signed request"]
     Receipt["SignedReceipt JSON"]
-    Header["Base64 X-402-Receipt header"]
-    Store["Receipt store: Redis by default, memory for tests"]
+    Header["Base64 X-402-Receipt header only"]
+    Store["Receipt store: Redis by default, memory for quick start/tests"]
     Lookup["GET /api/receipts/{id}"]
-    Verify["Client verifies signature with web/src/lib/verify-receipt.ts"]
+    Verify["Client can verify signature with web/src/lib/verify-receipt.ts"]
 
     Success --> Receipt
     Receipt --> Header

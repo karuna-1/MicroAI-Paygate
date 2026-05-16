@@ -24,13 +24,20 @@ sequenceDiagram
     participant R as Redis or Memory Store
 
     C->>G: POST /api/ai/summarize
-    G-->>C: 402 + paymentContext
-    C->>G: Retry with signature, nonce, timestamp
-    G->>V: POST /verify
-    V-->>G: valid + recovered wallet
-    G->>A: Generate summary
-    A-->>G: Summary
-    G->>R: Store signed receipt
+    G-->>C: 402 + paymentContext(recipient, token, amount, chainId, nonce, timestamp)
+    C->>G: Retry with X-402-Signature, X-402-Nonce, X-402-Timestamp
+    G->>V: POST /verify with reconstructed context
+    V-->>G: valid + recovered wallet or structured error_code
+    alt Optional Redis response cache hit
+      G->>R: Read cached summary after verification
+    else Cache miss or cache disabled
+      G->>A: Generate summary
+      A-->>G: Summary
+      opt CACHE_ENABLED=true
+        G->>R: Store cached summary
+      end
+    end
+    G->>R: Store signed receipt with TTL
     G-->>C: 200 + X-402-Receipt
 ```
 
