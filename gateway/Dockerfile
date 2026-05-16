@@ -8,7 +8,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o gateway main.go
 
 # Runtime Stage
 FROM alpine:latest
-RUN apk add --no-cache ca-certificates && adduser -D -u 1000 appuser
+RUN apk add --no-cache ca-certificates wget && adduser -D -u 1000 appuser
 WORKDIR /home/appuser
 
 # Copy binary
