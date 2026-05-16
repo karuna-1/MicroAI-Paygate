@@ -143,7 +143,10 @@ The gateway exposes sanitized public errors and logs internal details with a `co
 - `verifier_timeout`
 - `upstream_unavailable`
 - `upstream_timeout`
+- `request_body_read_failed`
+- `response_encoding_failed`
 - `receipt_generation_failed`
 - `receipt_store_failed`
+- `receipt_encoding_failed`
 
 Do not expose verifier internals, provider response bodies, private keys, Redis URLs, or raw secrets in public responses.
