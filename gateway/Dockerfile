@@ -4,7 +4,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o gateway main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o gateway .
 
 # Runtime Stage
 FROM alpine:latest
