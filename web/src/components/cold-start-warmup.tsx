@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL;
+const VERIFIER_URL = process.env.NEXT_PUBLIC_VERIFIER_URL;
 
 export function ColdStartWarmup() {
   const [warm, setWarm] = useState(!GATEWAY_URL);
@@ -10,12 +11,21 @@ export function ColdStartWarmup() {
   useEffect(() => {
     if (!GATEWAY_URL) return;
     const controller = new AbortController();
-    fetch(`${GATEWAY_URL}/healthz`, {
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then(() => setWarm(true))
-      .catch(() => setWarm(true));
+    const probes: Promise<unknown>[] = [
+      fetch(`${GATEWAY_URL}/healthz`, {
+        cache: "no-store",
+        signal: controller.signal,
+      }).catch(() => {}),
+    ];
+    if (VERIFIER_URL) {
+      probes.push(
+        fetch(`${VERIFIER_URL}/health`, {
+          cache: "no-store",
+          signal: controller.signal,
+        }).catch(() => {}),
+      );
+    }
+    Promise.allSettled(probes).then(() => setWarm(true));
     return () => controller.abort();
   }, []);
 
