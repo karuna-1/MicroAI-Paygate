@@ -1,188 +1,250 @@
-# Deployment Prep
+# Deployment
 
-Phase 3 prepares deployment files and operator instructions only. Do not run the Fly app creation, Fly secret, Fly deploy, Vercel env, or Vercel deploy commands until Phase 4 manual review approves real production values.
+Free-tier deployment of MicroAI Paygate across three platforms. Total recurring cost: **$0**. No credit card required.
 
 ## Topology
 
-- Gateway: public Fly app on port `3000`, health check `GET /healthz`
-- Verifier: private Fly app on port `3002`, reachable only over Fly internal DNS at `http://<verifier-app>.internal:3002`
-- Web: Vercel-hosted Next.js app
-- Redis: Upstash Redis for receipts and optional response cache
+| Service | Host | Plan | Notes |
+| --- | --- | --- | --- |
+| `verifier/` (Rust) | Render Web Service | Free | Public over HTTPS; stateless EIP-712 recovery |
+| `gateway/` (Go) | Render Web Service | Free | Public; calls verifier and OpenRouter, talks to Redis |
+| `web/` (Next.js) | Vercel | Hobby | Built from `web/` subdirectory |
+| Redis | Upstash | Free | Receipt store + nonce replay protection |
 
-The verifier stays private because the gateway is the only public caller. Keeping verifier traffic on Fly internal DNS reduces the exposed cryptographic verification surface.
-
-Keep the verifier at one Machine until replay nonce storage is moved to a shared store such as Redis. The current verifier uses in-process nonce replay protection.
+Both Render services share a region for low inter-service latency. Both **sleep after 15 minutes of inactivity** — the first request after sleep takes 30–50 seconds while the containers wake. The web app shows a warm-up banner during this window. See [Cold-start behavior](#cold-start-behavior) for details.
 
 ## Prerequisites
 
-- Fly CLI authenticated with access to the target org
-- Vercel CLI authenticated with access to the target project
-- Upstash Redis database URL
-- OpenRouter API key
-- Base Sepolia demo server wallet private key
-- Base Sepolia recipient address
-- Reviewed copies of `deploy/fly/gateway.fly.toml`, `deploy/fly/verifier.fly.toml`, and `.env.production.example`
+You'll need accounts on:
 
-## 1. Choose App Names
+- [Render](https://render.com) — GitHub OAuth sign-up, **no card required**
+- [Vercel](https://vercel.com) — GitHub OAuth sign-up, no card required
+- [Upstash](https://upstash.com) — GitHub OAuth sign-up, no card required
+- [OpenRouter](https://openrouter.ai) — free models are available (`z-ai/glm-4.5-air:free` by default)
 
-Replace these placeholders before running any command:
+And these values in hand:
 
-```sh
-export FLY_ORG=<your-fly-org>
-export GATEWAY_APP=<gateway-app>
-export VERIFIER_APP=<verifier-app>
-export VERCEL_APP_URL=https://<your-vercel-app>.vercel.app
-```
+- `OPENROUTER_API_KEY` from OpenRouter
+- `SERVER_WALLET_PRIVATE_KEY` — any 64-hex private key (demo only, never holds real funds)
+- `RECIPIENT_ADDRESS` — the EIP-55-checksummed address derived from the key above
+- `REDIS_URL` from Upstash (format: `rediss://default:...@...upstash.io:6379`)
 
-Update `app = "<gateway-app>"` in `deploy/fly/gateway.fly.toml`.
-Update `app = "<verifier-app>"` in `deploy/fly/verifier.fly.toml`.
-Update `VERIFIER_URL = "http://<verifier-app>.internal:3002"` in `deploy/fly/gateway.fly.toml`.
-
-Base Sepolia is the default chain for this deployment prep. For any other chain, update `CHAIN_ID` and `EXPECTED_CHAIN_ID` together in `.env.production.example`, `deploy/fly/gateway.fly.toml`, and `deploy/fly/verifier.fly.toml` so the gateway and verifier cannot drift.
-
-## 2. Create Fly Apps
-
-Phase 3 does not run these commands. They are prepared for Phase 4.
+Optional but recommended CLIs:
 
 ```sh
-fly apps create <verifier-app> --org <your-fly-org>
-fly apps create <gateway-app> --org <your-fly-org>
+brew install render vercel-cli
+render login    # GitHub OAuth
+vercel login    # GitHub OAuth
+render workspace set
 ```
 
-## 3. Provision Upstash Redis
+## 1. Provision Upstash Redis
 
-Create an Upstash Redis database in the Upstash console. Use TLS when available and copy the production Redis URL, for example:
+1. Sign up at https://upstash.com using GitHub OAuth.
+2. Console → **Create Database** → choose **Regional**, pick the region nearest your eventual Render region (e.g. Mumbai/`bom` or Singapore/`sin`), keep TLS enabled, leave eviction **off** for nonce-replay correctness.
+3. Open the database → **Connect to your database** → copy the `rediss://` URL (TLS). Save it — this is `REDIS_URL`.
 
-```text
-<your-upstash-redis-url>
-```
-
-Set it only through Fly secrets. Do not commit the real URL to this repository.
-
-## 4. Set Fly Secrets
-
-Use placeholders until Phase 4. Do not commit real secret values.
+Quick sanity check:
 
 ```sh
-fly secrets set -a <gateway-app> \
-  OPENROUTER_API_KEY=<your-openrouter-api-key> \
-  SERVER_WALLET_PRIVATE_KEY=<your-demo-server-wallet-private-key> \
-  RECIPIENT_ADDRESS=<your-base-sepolia-recipient-address> \
-  REDIS_URL=<your-upstash-redis-url>
+redis-cli -u 'rediss://default:...@...upstash.io:6379' PING   # should print PONG
 ```
 
-Non-secret gateway settings such as `OPENROUTER_MODEL`, `PAYMENT_AMOUNT`, and `ALLOWED_ORIGINS` live in `deploy/fly/gateway.fly.toml`. Edit those placeholders before deploying instead of setting them as Fly secrets.
+## 2. Deploy the Verifier on Render
 
-If you later enable `RATE_LIMIT_ENABLED=true` on Fly, configure trusted Fly proxy CIDRs first so IP-based rate limiting uses real client IPs instead of a shared proxy address:
+The verifier is stateless EIP-712 signature recovery. Public on Render's free tier — acceptable because it exposes no secrets and only does cryptographic recovery on caller-supplied inputs.
+
+1. Render dashboard → **New +** → **Web Service** → connect `AnkanMisra/MicroAI-Paygate`.
+2. Configure:
+
+| Field | Value |
+| --- | --- |
+| Name | `microai-verifier` (or similar; becomes the URL subdomain) |
+| Language | Docker |
+| Branch | `main` |
+| Root Directory | `verifier` |
+| Region | Singapore (`aws-ap-southeast-1`) — closest free region for Mumbai Upstash; pick whatever matches your Upstash region |
+| Instance Type | **Free** (default is paid — must change) |
+| Docker Build Context Directory | `verifier` |
+| Dockerfile Path | `verifier/Dockerfile` |
+| Health Check Path | `/health` |
+
+3. Environment variables (Advanced section):
+   - `CHAIN_ID=84532`
+   - `PORT=3002`
+
+4. Click **Deploy Web Service**. First Rust build takes ~3–5 min.
+5. Copy the assigned public URL — e.g. `https://microai-verifier.onrender.com`. The gateway needs this URL in the next step.
+
+Verify:
 
 ```sh
-fly secrets set -a <gateway-app> \
-  TRUSTED_PROXIES=<fly-proxy-cidr>
+curl https://<verifier-app>.onrender.com/health
+# {"status":"healthy","service":"verifier","version":"..."}
 ```
 
-Mirror non-secret runtime values from `.env.production.example` in the Fly config files and use Fly secrets only for secret values or values you intentionally do not want committed. Keep `CHAIN_ID` and `EXPECTED_CHAIN_ID` synchronized.
+## 3. Deploy the Gateway on Render
 
-The verifier currently needs no secret material. Its non-secret defaults are committed in `deploy/fly/verifier.fly.toml`:
+1. Render dashboard → **New +** → **Web Service** → same repo.
+2. Configure:
+
+| Field | Value |
+| --- | --- |
+| Name | `microai-gateway` (must differ from the verifier's name) |
+| Language | Docker |
+| Branch | `main` |
+| Root Directory | `gateway` |
+| Region | **same as verifier** |
+| Instance Type | **Free** |
+| Docker Build Context Directory | `gateway` |
+| Dockerfile Path | `gateway/Dockerfile` |
+| Health Check Path | `/healthz` (note the trailing `z` — differs from the verifier) |
+
+3. Environment variables. Use Render's **"Add from .env"** button and paste the block below, then fill in the four `<...>` placeholders with real values:
+
+```env
+OPENROUTER_API_KEY=<your-openrouter-key>
+OPENROUTER_MODEL=z-ai/glm-4.5-air:free
+SERVER_WALLET_PRIVATE_KEY=<your-64-hex-key>
+RECIPIENT_ADDRESS=<your-eip55-checksummed-address>
+REDIS_URL=<your-upstash-rediss-url>
+RECEIPT_STORE=redis
+VERIFIER_URL=https://<verifier-app>.onrender.com
+CHAIN_ID=84532
+EXPECTED_CHAIN_ID=84532
+PAYMENT_AMOUNT=0.001
+ALLOWED_ORIGINS=*
+TRUSTED_PROXIES=0.0.0.0/0
+VERIFIER_TIMEOUT_SECONDS=60
+PORT=3000
+```
+
+> **Important:** `RECIPIENT_ADDRESS` must be the canonical EIP-55-checksummed form, not lowercased or arbitrary-case. The browser wallet rejects malformed checksums with `bad address checksum` during signing.
+>
+> **CORS:** `ALLOWED_ORIGINS=*` is permissive; tighten it after web deploy in step 5.
+>
+> **Verifier timeout:** the default `2s` is too short for Render free-tier cold-starts. `60s` lets the verifier wake up during the first signed request.
+
+4. Click **Deploy Web Service**. Go builds take ~2 min.
+5. Verify:
 
 ```sh
-fly secrets list -a <verifier-app>
+curl https://<gateway-app>.onrender.com/healthz
+# {"service":"gateway","status":"ok","timestamp":...}
 ```
 
-## 5. Deploy Verifier
-
-Deploy verifier before gateway so the gateway can reach `http://<verifier-app>.internal:3002`.
+6. Test the 402 challenge:
 
 ```sh
-(cd verifier && fly deploy -c ../deploy/fly/verifier.fly.toml -a <verifier-app>)
-fly scale count 1 -a <verifier-app>
-```
-
-## 6. Deploy Gateway
-
-```sh
-(cd gateway && fly deploy -c ../deploy/fly/gateway.fly.toml -a <gateway-app>)
-```
-
-Fly should route public HTTPS traffic to the gateway app and use `GET /healthz` for stable liveness during cold starts. Use `/readyz` manually when checking dependency readiness because it also checks verifier, provider, and Redis reachability.
-
-## 7. Configure Vercel
-
-Do not hard-code the real gateway URL in `web/vercel.json`. Set it in Vercel project settings or through the CLI:
-
-```sh
-cd web
-vercel link
-vercel env add NEXT_PUBLIC_GATEWAY_URL production
-```
-
-When prompted for `NEXT_PUBLIC_GATEWAY_URL`, enter:
-
-```text
-https://<gateway-app>.fly.dev
-```
-
-If you are deploying with a non-default chain (e.g. Base mainnet rather than Base Sepolia) or a non-default fee, you must also set the matching public display vars so the wallet widget, hero headline, and stat bar agree with the gateway's payment context. All four are `NEXT_PUBLIC_*` so they're inlined into the Next.js bundle at build time:
-
-```sh
-vercel env add NEXT_PUBLIC_EXPECTED_CHAIN_ID production    # e.g. 8453 for Base mainnet
-vercel env add NEXT_PUBLIC_EXPECTED_CHAIN_NAME production  # e.g. Base
-vercel env add NEXT_PUBLIC_PAYMENT_AMOUNT production       # e.g. 0.001
-vercel env add NEXT_PUBLIC_PAYMENT_TOKEN production        # e.g. USDC
-```
-
-`NEXT_PUBLIC_EXPECTED_CHAIN_ID` must match the gateway's `CHAIN_ID`, and `NEXT_PUBLIC_EXPECTED_CHAIN_NAME` must match it (e.g. `8453` paired with `Base`, not `Base Sepolia`) — otherwise the UI will contradict itself. Defaults are Base Sepolia (`84532`, `Base Sepolia`) and `0.001 USDC`.
-
-Run the CLI commands from `web/`. If you link from the repository root or configure the project in the Vercel dashboard, set the project root directory to `web`.
-
-Deploy the web app after the env is configured:
-
-```sh
-vercel deploy --prod
-```
-
-## 8. Smoke Tests
-
-Run these only after Phase 4 deploys real apps and secrets.
-
-```sh
-curl -fsS https://<gateway-app>.fly.dev/healthz
-```
-
-An unsigned summarize request should return `402` with a payment context:
-
-```sh
-curl -i https://<gateway-app>.fly.dev/api/ai/summarize \
+curl -i https://<gateway-app>.onrender.com/api/ai/summarize \
   -H 'Content-Type: application/json' \
-  -d '{"text":"Summarize this deployment smoke test."}'
+  -d '{"text":"hello"}'
+# HTTP 402
+# {"error":"Payment Required","paymentContext":{...}}
 ```
 
-Then use the Vercel web app with a Base Sepolia wallet:
+## 4. Deploy the Web on Vercel
 
-1. Open `https://<your-vercel-app>.vercel.app`.
-2. Submit a summarize request.
-3. Confirm the wallet is on Base Sepolia.
-4. Sign the EIP-712 payment request.
-5. Confirm the signed retry returns `200`.
-6. Capture the `X-402-Receipt` value from the response.
+1. Sign up at https://vercel.com using GitHub OAuth.
+2. **Add New** → **Project** → import `AnkanMisra/MicroAI-Paygate`.
+3. Configure:
 
-Decode the receipt header before using it in the lookup endpoint. `X-402-Receipt` is base64-encoded signed receipt JSON; the lookup endpoint expects the embedded receipt ID.
+| Field | Value |
+| --- | --- |
+| Project Name | `microai-paygate` (becomes the Vercel subdomain) |
+| Framework | Next.js (auto-detected) |
+| Root Directory | `web` |
+
+4. Environment Variables — add:
+   - `NEXT_PUBLIC_GATEWAY_URL` = `https://<gateway-app>.onrender.com`
+   - `NEXT_PUBLIC_VERIFIER_URL` = `https://<verifier-app>.onrender.com` (lets the warm-up banner pre-wake the verifier too)
+
+The four other `NEXT_PUBLIC_*` vars (`EXPECTED_CHAIN_ID`, `EXPECTED_CHAIN_NAME`, `PAYMENT_AMOUNT`, `PAYMENT_TOKEN`) have correct defaults baked into the code for Base Sepolia + USDC + 0.001. Set them only if you deploy against a non-default chain.
+
+5. **Deploy**. ~1–2 min.
+6. Copy the assigned URL — e.g. `https://microai-paygate.vercel.app`.
+
+## 5. Tighten Gateway CORS
+
+Go back to the gateway service on Render → **Environment** → update `ALLOWED_ORIGINS` from `*` to your exact Vercel domain:
+
+```
+ALLOWED_ORIGINS=https://<your-vercel-app>.vercel.app
+```
+
+This triggers an auto-redeploy. After ~1 min, preflight requests from the Vercel origin should still succeed; requests from any other origin will be blocked.
+
+Verify:
 
 ```sh
-RECEIPT_B64=<x-402-receipt-header-value>
-RECEIPT_ID=$(printf '%s' "$RECEIPT_B64" | python3 -c 'import base64,json,sys; print(json.loads(base64.b64decode(sys.stdin.read().strip()))["receipt"]["id"])')
+curl -sI -X OPTIONS \
+  -H 'Origin: https://<your-vercel-app>.vercel.app' \
+  -H 'Access-Control-Request-Method: POST' \
+  https://<gateway-app>.onrender.com/api/ai/summarize | grep -i access-control-allow-origin
+# access-control-allow-origin: https://<your-vercel-app>.vercel.app
 ```
 
-Verify receipt persistence after a gateway restart or deploy:
+## 6. Smoke Test the Full Flow
+
+1. Open `https://<your-vercel-app>.vercel.app` in a browser.
+2. You may see a "§ Free tier wake-up" banner at the top while the warm-up pings resolve.
+3. Connect MetaMask (or any EIP-1193 wallet) on Base Sepolia.
+4. Paste a paragraph of text into the form.
+5. Click **Sign & Summarize**.
+6. Wallet pops up — sign the EIP-712 typed-data payment context.
+7. Wait for: verifier validates → gateway calls OpenRouter → receipt is signed and returned.
+8. The receipt panel shows: summary text, signed receipt JSON, and a client-side signature verification badge.
+
+If any step errors, check Render service logs for the gateway and verifier — both are visible from the Render dashboard.
+
+## Cold-start behavior
+
+Render's free tier sleeps web services after 15 minutes of no traffic. The first request after sleep takes 30–50 seconds while the container restarts. Mitigations baked into this project:
+
+- `web/src/components/cold-start-warmup.tsx` pings both `gateway/healthz` and `verifier/health` in parallel on first page load and shows a banner until they resolve. Subsequent requests are normal speed.
+- `VERIFIER_TIMEOUT_SECONDS=60` on the gateway tolerates verifier cold-starts during signed requests.
+
+These are good enough for portfolio / demo use. For an always-on production deployment, upgrade Render's Starter plan ($7/mo per service) or pivot to Fly.io (requires a card).
+
+## Updating env vars after initial deploy
+
+Use either the Render dashboard or the CLI:
 
 ```sh
-curl -i https://<gateway-app>.fly.dev/api/receipts/$RECEIPT_ID
+# Render CLI — list services
+render services
+
+# Render REST API — update one env var (no CLI command yet exists for this)
+RENDER_TOKEN=$(grep '^    key:' ~/.render/cli.yaml | awk '{print $2}')
+curl -s -X PUT \
+  -H "Authorization: Bearer $RENDER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "$(jq -n --arg v 'new-value' '{value: $v}')" \
+  "https://api.render.com/v1/services/<service-id>/env-vars/<KEY>"
+
+# Trigger a redeploy
+render deploys create <service-id>
 ```
 
-The receipt should remain retrievable after the gateway Machine is restarted or a new gateway deploy completes, because production uses `RECEIPT_STORE=redis` backed by Upstash Redis.
+For Vercel env vars, use the CLI from the `web/` directory:
+
+```sh
+vercel env add NEXT_PUBLIC_FOO production
+vercel env rm  NEXT_PUBLIC_FOO production
+```
 
 ## Secret Handling
 
-- Committed files contain placeholders only.
-- Real values belong in Fly secrets or Vercel environment settings.
-- Never commit OpenRouter keys, private keys, Upstash Redis URLs, or production wallet material.
-- Review `.env.production.example` before copying values into any secret store.
+- `.env.production.example` and committed `*.yaml` files contain placeholders only.
+- Real values belong only in Render service env vars and Vercel project env vars.
+- Never commit OpenRouter keys, private keys, Upstash URLs, or wallet material.
+- Audit `.env*` files before any push: they should appear in `.gitignore`.
+
+## Alternative platforms
+
+If you'd rather pay for always-on hosting:
+
+- **Fly.io** — requires a card on file but the same architecture maps cleanly (private networking between gateway and verifier via `.internal` DNS).
+- **Railway**, **Koyeb**, **Hugging Face Spaces** — all support Docker. Refer to each platform's docs.
+
+This guide is opinionated toward Render + Vercel + Upstash because that combination is genuinely zero-cost-zero-card and produces resume-credible URLs.
