@@ -10,6 +10,7 @@ import (
 func TestValidateConfig_MissingRequiredEnv(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "")
 	t.Setenv("SERVER_WALLET_PRIVATE_KEY", "")
+	t.Setenv("VERIFIER_URL", "")
 	t.Setenv("CACHE_ENABLED", "false")
 	t.Setenv("RECEIPT_STORE", "memory")
 
@@ -18,7 +19,7 @@ func TestValidateConfig_MissingRequiredEnv(t *testing.T) {
 		t.Fatalf("expected error when required env vars are missing, got nil")
 	}
 
-	expectedVars := []string{"OPENROUTER_API_KEY", "SERVER_WALLET_PRIVATE_KEY"}
+	expectedVars := []string{"OPENROUTER_API_KEY", "SERVER_WALLET_PRIVATE_KEY", "VERIFIER_URL"}
 	errStr := err.Error()
 	for _, v := range expectedVars {
 		if !strings.Contains(errStr, v) {
@@ -27,9 +28,46 @@ func TestValidateConfig_MissingRequiredEnv(t *testing.T) {
 	}
 }
 
+// TestNormalizeRecipientAddress covers the three branches of the new
+// startup-time address normalization: empty (no-op), valid hex with
+// non-canonical case (rewrites to EIP-55), and invalid hex (returns error).
+// The non-canonical case is the exact bug that produced the production
+// `bad address checksum` wallet rejection.
+func TestNormalizeRecipientAddress(t *testing.T) {
+	t.Run("empty leaves env unset and returns nil", func(t *testing.T) {
+		t.Setenv("RECIPIENT_ADDRESS", "")
+		if err := normalizeRecipientAddress(); err != nil {
+			t.Fatalf("expected nil error for unset address, got: %v", err)
+		}
+		if got := os.Getenv("RECIPIENT_ADDRESS"); got != "" {
+			t.Errorf("expected env to remain unset, got %q", got)
+		}
+	})
+
+	t.Run("non-canonical case is rewritten to EIP-55", func(t *testing.T) {
+		// Lowercase form of the canonical hardhat account 0.
+		t.Setenv("RECIPIENT_ADDRESS", "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266")
+		if err := normalizeRecipientAddress(); err != nil {
+			t.Fatalf("expected nil error for valid lowercased address, got: %v", err)
+		}
+		want := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+		if got := os.Getenv("RECIPIENT_ADDRESS"); got != want {
+			t.Errorf("expected normalized %s, got %s", want, got)
+		}
+	})
+
+	t.Run("invalid hex returns error", func(t *testing.T) {
+		t.Setenv("RECIPIENT_ADDRESS", "0xZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ")
+		if err := normalizeRecipientAddress(); err == nil {
+			t.Fatal("expected error for invalid hex, got nil")
+		}
+	})
+}
+
 func TestValidateConfig_WithRequiredEnv(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "test-key")
 	t.Setenv("SERVER_WALLET_PRIVATE_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	t.Setenv("VERIFIER_URL", "http://127.0.0.1:3002")
 	t.Setenv("CACHE_ENABLED", "false")
 	t.Setenv("RECEIPT_STORE", "memory")
 	t.Setenv("RECIPIENT_ADDRESS", "0x2cAF48b4BA1C58721a85dFADa5aC01C2DFa62219")
@@ -43,6 +81,7 @@ func TestValidateConfig_WithRequiredEnv(t *testing.T) {
 func TestValidateConfig_CacheEnabledRequiresRedis(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "test-key")
 	t.Setenv("SERVER_WALLET_PRIVATE_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	t.Setenv("VERIFIER_URL", "http://127.0.0.1:3002")
 	t.Setenv("CACHE_ENABLED", "true")
 	t.Setenv("RECEIPT_STORE", "memory")
 	t.Setenv("REDIS_URL", "")
@@ -61,6 +100,7 @@ func TestValidateConfig_CacheEnabledRequiresRedis(t *testing.T) {
 func TestValidateConfig_CacheEnabledWithValidRedis(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "test-key")
 	t.Setenv("SERVER_WALLET_PRIVATE_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	t.Setenv("VERIFIER_URL", "http://127.0.0.1:3002")
 	t.Setenv("CACHE_ENABLED", "true")
 	t.Setenv("RECEIPT_STORE", "memory")
 	t.Setenv("REDIS_URL", "localhost:6379")
@@ -75,6 +115,7 @@ func TestValidateConfig_CacheEnabledWithValidRedis(t *testing.T) {
 func TestValidateConfig_DefaultReceiptStoreRequiresRedis(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "test-key")
 	t.Setenv("SERVER_WALLET_PRIVATE_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	t.Setenv("VERIFIER_URL", "http://127.0.0.1:3002")
 	t.Setenv("CACHE_ENABLED", "false")
 	t.Setenv("RECEIPT_STORE", "")
 	t.Setenv("REDIS_URL", "")
@@ -92,6 +133,7 @@ func TestValidateConfig_DefaultReceiptStoreRequiresRedis(t *testing.T) {
 func TestValidateConfig_MemoryReceiptStoreDoesNotRequireRedis(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "test-key")
 	t.Setenv("SERVER_WALLET_PRIVATE_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	t.Setenv("VERIFIER_URL", "http://127.0.0.1:3002")
 	t.Setenv("CACHE_ENABLED", "false")
 	t.Setenv("RECEIPT_STORE", "memory")
 	t.Setenv("REDIS_URL", "")
@@ -106,6 +148,7 @@ func TestValidateConfig_MemoryReceiptStoreDoesNotRequireRedis(t *testing.T) {
 func TestValidateConfig_InvalidReceiptStoreMode(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "test-key")
 	t.Setenv("SERVER_WALLET_PRIVATE_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	t.Setenv("VERIFIER_URL", "http://127.0.0.1:3002")
 	t.Setenv("CACHE_ENABLED", "false")
 	t.Setenv("RECEIPT_STORE", "postgres")
 	t.Setenv("REDIS_URL", "localhost:6379")
