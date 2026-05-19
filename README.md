@@ -12,6 +12,16 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg"></a>
 </p>
 
+## Live Demo
+
+**https://microai-paygate.vercel.app**
+
+The backend services (gateway + verifier) are hosted on Render's free tier and **sleep after 15 minutes of inactivity**. The first request after a quiet period takes 30–50 seconds while both services wake. The web UI shows a brief warm-up banner during this window. Subsequent requests are normal speed.
+
+The deployed stack is **Render** (Rust verifier + Go gateway) + **Vercel** (Next.js web) + **Upstash** (Redis for nonces and signed receipts). All on free tiers — total recurring cost is $0. See [DEPLOY.md](DEPLOY.md) for the step-by-step deployment guide.
+
+The demo runs on **Base Sepolia testnet**. A valid EIP-712 signature proves wallet authorization for the payment context; it does not move USDC on-chain. Bring a wallet on Base Sepolia to try the full sign-and-summarize flow.
+
 ## What This Project Does
 
 MicroAI Paygate demonstrates a payment-gated AI microservice stack. A client asks the gateway for an AI summary. If the request is unsigned, the gateway returns HTTP `402 Payment Required` with a payment context. The client signs that context with an EVM wallet using EIP-712 typed data and retries the request with `X-402-*` headers. The gateway verifies the signature through a Rust verifier service, calls the configured AI provider, signs a receipt, stores it, and returns the AI result.
