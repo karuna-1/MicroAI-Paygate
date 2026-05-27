@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Geist_Mono } from "next/font/google";
 import localFont from "next/font/local";
 import "./globals.css";
 import { SmoothScroll } from "@/components/smooth-scroll";
@@ -26,18 +25,13 @@ const clashDisplay = localFont({
   display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
 const DISPLAY_CHAIN_NAME =
   process.env.NEXT_PUBLIC_EXPECTED_CHAIN_NAME ?? "Base Sepolia";
 
 export const metadata: Metadata = {
-  title: `MicroAI Paygate — pay-per-call AI, settled on ${DISPLAY_CHAIN_NAME}`,
+  title: `MicroAI Paygate — pay-per-call AI, authorized on ${DISPLAY_CHAIN_NAME}`,
   description:
-    "An x402 payment gateway for AI requests. Sign EIP-712, get a signed receipt, verify the signature client-side.",
+    "An x402-style payment gateway for AI requests. Sign EIP-712, get a signed receipt, verify the signature client-side.",
 };
 
 export default function RootLayout({
@@ -48,7 +42,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${satoshi.variable} ${geistMono.variable} ${clashDisplay.variable} bg-paper text-ink antialiased`}
+        className={`${satoshi.variable} ${clashDisplay.variable} overflow-x-hidden bg-paper text-ink antialiased`}
       >
         <SmoothScroll />
         <ColdStartWarmup />
