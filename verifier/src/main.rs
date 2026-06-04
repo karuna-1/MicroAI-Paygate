@@ -46,6 +46,7 @@ struct MemoryNonceStore {
 struct RedisNonceStore {
     client: redis::Client,
     key_prefix: String,
+    timeout: Duration,
 }
 
 enum NonceStore {
@@ -82,6 +83,14 @@ impl From<redis::RedisError> for NonceStoreError {
     fn from(err: redis::RedisError) -> Self {
         Self {
             message: format!("redis nonce store unavailable: {}", err),
+        }
+    }
+}
+
+impl NonceStoreError {
+    fn timeout(operation: &str) -> Self {
+        Self {
+            message: format!("redis nonce store timed out during {operation}"),
         }
     }
 }
@@ -162,6 +171,10 @@ fn get_redis_nonce_key_prefix() -> String {
         .unwrap_or_else(|| "microai:verifier:nonce:".to_string())
 }
 
+fn redis_nonce_timeout() -> Duration {
+    Duration::from_secs(2)
+}
+
 fn build_nonce_store_from_env() -> Result<Arc<NonceStore>, String> {
     let mode = env::var("VERIFIER_NONCE_STORE")
         .unwrap_or_else(|_| "memory".to_string())
@@ -178,6 +191,7 @@ fn build_nonce_store_from_env() -> Result<Arc<NonceStore>, String> {
             Ok(Arc::new(NonceStore::Redis(RedisNonceStore {
                 client,
                 key_prefix: get_redis_nonce_key_prefix(),
+                timeout: redis_nonce_timeout(),
             })))
         }
         other => Err(format!(
@@ -412,18 +426,26 @@ async fn claim_redis_nonce(
     nonce: &str,
     ttl: Duration,
 ) -> Result<bool, NonceStoreError> {
-    let mut conn = store.client.get_multiplexed_async_connection().await?;
+    let mut conn = tokio::time::timeout(
+        store.timeout,
+        store.client.get_multiplexed_async_connection(),
+    )
+    .await
+    .map_err(|_| NonceStoreError::timeout("connection acquisition"))??;
     let ttl_seconds = ttl.as_secs().max(1);
     let key = redis_nonce_key(&store.key_prefix, nonce);
-    let result: Option<String> = conn
-        .set_options(
+    let result: Option<String> = tokio::time::timeout(
+        store.timeout,
+        conn.set_options(
             key,
             "1",
             redis::SetOptions::default()
                 .conditional_set(redis::ExistenceCheck::NX)
                 .with_expiration(redis::SetExpiry::EX(ttl_seconds)),
-        )
-        .await?;
+        ),
+    )
+    .await
+    .map_err(|_| NonceStoreError::timeout("atomic nonce claim"))??;
 
     Ok(result.is_some())
 }
@@ -1229,6 +1251,7 @@ mod tests {
             Arc::new(NonceStore::Redis(RedisNonceStore {
                 client,
                 key_prefix: "test:verifier:nonce:".to_string(),
+                timeout: redis_nonce_timeout(),
             })),
             300,
             60,
