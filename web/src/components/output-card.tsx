@@ -9,9 +9,10 @@ import { CopyButton } from "./copy-button";
 type Props = {
   summary: string;
   receipt: SignedReceipt | null;
+  verifyState: ReceiptVerifyState;
 };
 
-type ReceiptVerifyState = "missing" | "verifying" | "valid" | "invalid";
+export type ReceiptVerifyState = "missing" | "verifying" | "valid" | "invalid";
 
 /**
  * Render a card showing the output summary, receipt status, and copy controls.
@@ -29,9 +30,7 @@ type ReceiptVerifyState = "missing" | "verifying" | "valid" | "invalid";
  * @param props.receipt - The signed receipt object or `null`; when provided the receipt ID is shown and can be copied.
  * @returns An article element containing the summary, receipt status, and copy buttons, or `null` if `summary` is falsy.
  */
-export function OutputCard({ summary, receipt }: Props) {
-  const verifyState = useReceiptVerification(receipt);
-
+export function OutputCard({ summary, receipt, verifyState }: Props) {
   if (!summary) return null;
 
   return (
@@ -86,43 +85,61 @@ export function OutputCard({ summary, receipt }: Props) {
   );
 }
 
-function useReceiptVerification(receipt: SignedReceipt | null): ReceiptVerifyState {
+export function useReceiptVerification(receipt: SignedReceipt | null): ReceiptVerifyState {
+  const receiptKey = getReceiptVerificationKey(receipt);
   const [result, setResult] = useState<{
-    id: string | null;
+    key: string | null;
     state: Exclude<ReceiptVerifyState, "missing" | "verifying">;
-  }>({ id: null, state: "invalid" });
+  }>({ key: null, state: "invalid" });
 
   useEffect(() => {
     let cancelled = false;
-    if (!receipt) return undefined;
+    if (!receipt || !receiptKey) return undefined;
 
     void verifyReceipt(receipt)
       .then((ok) => {
         if (!cancelled) {
-          setResult({ id: receipt.receipt.id, state: ok ? "valid" : "invalid" });
+          setResult({ key: receiptKey, state: ok ? "valid" : "invalid" });
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setResult({ id: receipt.receipt.id, state: "invalid" });
+          setResult({ key: receiptKey, state: "invalid" });
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [receipt]);
+  }, [receipt, receiptKey]);
 
   if (!receipt) return "missing";
-  if (result.id !== receipt.receipt.id) return "verifying";
+  if (result.key !== receiptKey) return "verifying";
   return result.state;
 }
 
+export function getReceiptVerificationKey(receipt: SignedReceipt | null): string | null {
+  if (!receipt) return null;
+
+  return JSON.stringify({
+    receipt: receipt.receipt,
+    signature: receipt.signature,
+    server_public_key: receipt.server_public_key,
+  });
+}
+
 function ReceiptStatusBadge({ state }: { state: ReceiptVerifyState }) {
-  if (state === "valid") return <Badge tone="ok">✓ Receipt verified</Badge>;
-  if (state === "invalid") return <Badge tone="alert">✗ Receipt not verified</Badge>;
-  if (state === "verifying") return <Badge tone="muted">Verifying receipt…</Badge>;
-  return <Badge tone="muted">Receipt not returned</Badge>;
+  let content = <Badge tone="muted">Receipt not returned</Badge>;
+
+  if (state === "valid") {
+    content = <Badge tone="ok">✓ Receipt verified</Badge>;
+  } else if (state === "invalid") {
+    content = <Badge tone="alert">✗ Receipt not verified</Badge>;
+  } else if (state === "verifying") {
+    content = <Badge tone="muted">Verifying receipt…</Badge>;
+  }
+
+  return content;
 }
 
 function describeReceiptState(state: ReceiptVerifyState): string {
