@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -60,6 +61,8 @@ type VerifyResponse struct {
 type SummarizeRequest struct {
 	Text string `json:"text"`
 }
+
+var receiptIDPattern = regexp.MustCompile(`^rcpt_[a-f0-9]{12}$`)
 
 // validateConfig validates all required environment variables at startup.
 // It checks for OPENROUTER_API_KEY, SERVER_WALLET_PRIVATE_KEY, and conditionally REDIS_URL.
@@ -854,11 +857,8 @@ func validateReceipt(receipt *SignedReceipt) error {
 	}
 
 	// Validate receipt fields
-	if receipt.Receipt.ID == "" {
-		return fmt.Errorf("receipt ID is empty")
-	}
-	if !strings.HasPrefix(receipt.Receipt.ID, "rcpt_") {
-		return fmt.Errorf("receipt ID must start with 'rcpt_'")
+	if !isValidReceiptID(receipt.Receipt.ID) {
+		return fmt.Errorf("invalid receipt ID format")
 	}
 	if receipt.Receipt.Version == "" {
 		return fmt.Errorf("receipt version is empty")
@@ -922,26 +922,41 @@ func getReceiptTTL() time.Duration {
 	}
 	return time.Duration(ttlSeconds) * time.Second
 }
+func isValidReceiptID(id string) bool {
+	return receiptIDPattern.MatchString(id)
+}
 
 // handleGetReceipt handles GET /api/receipts/:id
 func handleGetReceipt(c *gin.Context) {
 	id := c.Param("id")
 
+	// Reject malformed IDs early (no store hit)
+	if !isValidReceiptID(id) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid receipt id format",
+			"message": "receipt id must start with rcpt_ followed by exactly 12 lowercase hexadecimal characters",
+		})
+		return
+	}
+
 	receipt, exists, err := getReceiptWithContext(c.Request.Context(), id)
 	if err != nil {
 		log.Printf("Failed to retrieve receipt %s: %v", id, err)
-		c.JSON(500, gin.H{"error": "Failed to retrieve receipt"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to retrieve receipt",
+		})
 		return
 	}
+
 	if !exists {
-		c.JSON(404, gin.H{
+		c.JSON(http.StatusNotFound, gin.H{
 			"error":   "Receipt not found",
 			"message": "Receipt may have expired or never existed",
 		})
 		return
 	}
 
-	c.JSON(200, gin.H{
+	c.JSON(http.StatusOK, gin.H{
 		"receipt":           receipt.Receipt,
 		"signature":         receipt.Signature,
 		"server_public_key": receipt.ServerPublicKey,
