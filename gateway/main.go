@@ -515,8 +515,11 @@ func handleSummarize(c *gin.Context) {
 	}
 
 	// Validate text is not empty (also validated in cache middleware, but needed here for non-cached requests)
-	if req.Text == "" {
-		c.JSON(400, gin.H{"error": "Invalid request", "message": "text field cannot be empty"})
+	if err := validatePrompt(req.Text); err != nil {
+		c.JSON(400, gin.H{
+			"error":   "Invalid request",
+			"message": err.Error(),
+		})
 		return
 	}
 

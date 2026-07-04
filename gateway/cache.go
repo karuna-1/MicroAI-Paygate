@@ -94,8 +94,11 @@ func CacheMiddleware() gin.HandlerFunc {
 		}
 
 		// Validate text is not empty
-		if req.Text == "" {
-			c.JSON(400, gin.H{"error": "Invalid request", "message": "text field cannot be empty"})
+		if err := validatePrompt(req.Text); err != nil {
+			c.JSON(400, gin.H{
+				"error":   "Invalid request",
+				"message": err.Error(),
+			})
 			c.Abort()
 			return
 		}
