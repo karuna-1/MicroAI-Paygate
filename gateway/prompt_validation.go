@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"unicode/utf8"
 )
 
 const MaxPromptLength = 4000
@@ -12,7 +13,6 @@ var injectionPatterns = []string{
 	"ignore all previous instructions",
 	"ignore your system prompt",
 	"disregard all prior",
-	"you are now",
 	"new persona",
 }
 
@@ -22,12 +22,14 @@ func validatePrompt(prompt string) error {
 		return fmt.Errorf("text field cannot be empty")
 	}
 
-	if len(prompt) > MaxPromptLength {
-		log.Printf("Rejected prompt: length=%d", len(prompt))
+	charCount := utf8.RuneCountInString(prompt)
+
+	if charCount > MaxPromptLength {
+		log.Printf("Rejected prompt: length=%d", charCount)
 		return fmt.Errorf(
 			"text exceeds maximum length of %d characters (received %d)",
 			MaxPromptLength,
-			len(prompt),
+			charCount,
 		)
 	}
 
