@@ -13,7 +13,6 @@ var injectionPatterns = []string{
 	"ignore all previous instructions",
 	"ignore your system prompt",
 	"disregard all prior",
-	"new persona",
 }
 
 func validatePrompt(prompt string) error {

@@ -327,6 +327,7 @@ components:
         text:
           type: string
           minLength: 1
+          maxLength: 4000
           example: Artificial intelligence is transforming software development.
 
     SummarizeResponse:
