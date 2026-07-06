@@ -76,6 +76,7 @@ export function SummarizeForm() {
             onChange={(e) => setInput(e.target.value)}
             placeholder={`Paste any text. The summary returns after a ${DISPLAY_CHAIN_NAME} signature.`}
             rows={9}
+            maxLength={4000}
             aria-label="Text to summarize"
             className="block w-full resize-none bg-paper p-4 font-sans text-base leading-relaxed text-ink placeholder:text-ink-faint focus:outline-none"
           />
