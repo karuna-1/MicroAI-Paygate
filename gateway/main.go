@@ -480,6 +480,22 @@ func handleSummarize(c *gin.Context) {
 		}
 	}
 
+	// 2. Parse Request
+	var req SummarizeRequest
+	if err := json.Unmarshal(requestBody, &req); err != nil {
+		c.JSON(400, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	// Validate text is not empty (also validated in cache middleware, but needed here for non-cached requests)
+	if err := validatePrompt(req.Text); err != nil {
+		c.JSON(400, gin.H{
+			"error":   "Invalid request",
+			"message": err.Error(),
+		})
+		return
+	}
+
 	// Verify
 	verifyResp, paymentCtx, err := verifyPayment(c.Request.Context(), signature, nonce, uint64(timestampValue))
 	if err != nil {
@@ -506,22 +522,6 @@ func handleSummarize(c *gin.Context) {
 	}
 
 	verificationTotal.WithLabelValues("success").Inc()
-
-	// 2. Parse Request
-	var req SummarizeRequest
-	if err := json.Unmarshal(requestBody, &req); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
-		return
-	}
-
-	// Validate text is not empty (also validated in cache middleware, but needed here for non-cached requests)
-	if err := validatePrompt(req.Text); err != nil {
-		c.JSON(400, gin.H{
-			"error":   "Invalid request",
-			"message": err.Error(),
-		})
-		return
-	}
 
 	// 3. Call AI Service
 	summary, err := aiProvider.Generate(c.Request.Context(), req.Text)
